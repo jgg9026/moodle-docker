@@ -5,6 +5,7 @@ services:
     depends_on:
       - db
     volumes:
+      - ./docker-php-ext-apcu.ini:/usr/local/etc/php/conf.d/docker-php-ext-apcu.ini
       - "${MOODLE_DOCKER_WWWROOT}:/var/www/html"
       - "${ASSETDIR}/web/apache2_faildumps.conf:/etc/apache2/conf-enabled/apache2_faildumps.conf"
     environment:
@@ -20,6 +21,8 @@ services:
       POSTGRES_USER: moodle
       POSTGRES_PASSWORD: "m@0dl3ing"
       POSTGRES_DB: moodle
+    ports:
+      - 5432:5432
   exttests:
     image: moodlehq/moodle-exttests
     volumes:
