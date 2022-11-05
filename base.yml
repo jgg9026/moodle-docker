@@ -20,5 +20,7 @@ services:
       - "${ASSETDIR}/exttests/apache2.conf:/etc/apache2/sites-enabled/000-default.conf"
   selenium:
     image: "selenium/standalone-firefox${MOODLE_DOCKER_SELENIUM_SUFFIX:-}:${MOODLE_DOCKER_BROWSER_TAG}"
+    #    Precious step will fail when using rancher. We can just hardcode the next step.
+    #    image: "selenium/standalone-firefox-debug:3"
     volumes:
       - "${MOODLE_DOCKER_WWWROOT}:/var/www/html:ro"

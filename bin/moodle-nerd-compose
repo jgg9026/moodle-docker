@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 set -e
-
-# First find out if this was called from symlink,
-# then find the real path of parent directory.
-# This is needed because macOS does not have GNU realpath.
-thisfile=$( readlink "${BASH_SOURCE[0]}" ) || thisfile="${BASH_SOURCE[0]}"
-basedir="$( cd "$( dirname "$thisfile" )/../" && pwd -P )"
-# Patch: Small trick to avoid copying the config template every time.
+# Patch: Handle env variables differently.
 B_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-# Environment variables in a text file, this can be changed on demand.
 source "${B_DIR}/../project_config.sh"
 cp "${B_DIR}/../config.docker-template.php" $MOODLE_DOCKER_WWWROOT/config.php
+# Rancher lacks support for environment variables, this can be used instead. Not elegant BTW.
+echo "MOODLE_DOCKER_WWWROOT=/Users/jonathan.garcia/Documents/core-moodle" > temp.env
+echo "MOODLE_DOCKER_DB=mysql" >> temp.env
+echo "MOODLE_DOCKER_DBNAME=m4.0" >> temp.env
+echo "MOODLE_DOCKER_WEB_HOST=moodle.test" >> temp.env
+echo "MOODLE_DOCKER_WEB_PORT=80" >> temp.env
+echo "MOODLE_DOCKER_BROWSER=firefox:3" >> temp.env
 # End of patch.
 if [ ! -d "$MOODLE_DOCKER_WWWROOT" ];
 then
@@ -24,49 +24,35 @@ then
     exit 1
 fi
 
-export ASSETDIR="${basedir}/assets"
+# Nasty portable way to the directory of this script, following symlink,
+# because readlink -f not on OSX. Thanks stack overflow..
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
+  DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+basedir="$( cd -P "$( dirname "$SOURCE" )/../" && pwd )"
+echo ASSETDIR="${basedir}/assets" >> temp.env
 
-# Test if we have docker compose v2, and keep quiet if we don't.
-ver=$(docker compose version > /dev/null 2>&1 && docker compose version --short) || true
-if [[ $ver =~ ^v?2 ]]; then
-  dockercompose="docker compose"
-else
-  echo 'Compose v2 is not available in Docker CLI, falling back to use docker-compose script'
-  dockercompose="docker-compose"
-fi
-dockercompose="${dockercompose} -f ${basedir}/base.yml"
-dockercompose="${dockercompose} -f ${basedir}/service.mail.yml"
+dockercompose="nerdctl compose"
+dockercompose="${dockercompose} -f ${basedir}/base.yml --env-file temp.env" 
+dockercompose="${dockercompose} -f ${basedir}/service.mail.yml --env-file temp.env"
 
 # PHP Version.
-export MOODLE_DOCKER_PHP_VERSION=${MOODLE_DOCKER_PHP_VERSION:-7.4}
+echo MOODLE_DOCKER_PHP_VERSION=${MOODLE_DOCKER_PHP_VERSION:-7.4} >> temp.env
 
-# Database flavour.
-dockercompose="${dockercompose} -f ${basedir}/db.${MOODLE_DOCKER_DB}.yml"
-
-# Add support for version specific database settings.
-if [ ! -z "$MOODLE_DOCKER_DB_VERSION" ];
+# Database flavour
+if [ "$MOODLE_DOCKER_DB" != 'pgsql' ];
 then
-    filename="${basedir}/db.${MOODLE_DOCKER_DB}.${MOODLE_DOCKER_DB_VERSION}.yml"
-    if [ -f $filename ]; then
-        dockercompose="${dockercompose} -f ${filename}"
-    fi
+    dockercompose="${dockercompose} -f ${basedir}/db.${MOODLE_DOCKER_DB}.yml --env-file temp.env"
+
 fi
 
-# Support PHP version overrides for DB not available any more.
-
-# Expose DB port if requested.
-if [[ $MOODLE_DOCKER_DB_PORT == *":"* ]] || [[ $MOODLE_DOCKER_DB_PORT -gt 0 ]]
-then
-    # If no bind ip has been configured (bind_ip:port), default to 127.0.0.1
-    if [[ ! $MOODLE_DOCKER_DB_PORT == *":"* ]]
-    then
-        export MOODLE_DOCKER_DB_PORT=127.0.0.1:$MOODLE_DOCKER_DB_PORT
-    fi
-    filename="${basedir}/db.${MOODLE_DOCKER_DB}.port.yml"
-    if [ -f $filename ];
-    then
-        dockercompose="${dockercompose} -f ${filename}"
-    fi
+# Support PHP version overrides for DB..
+filename="${basedir}/db.${MOODLE_DOCKER_DB}.${MOODLE_DOCKER_PHP_VERSION}.yml"
+if [ -f $filename ]; then
+    dockercompose="${dockercompose} -f ${filename} --env-file temp.env"
 fi
 
 # Fix mobile app deprecated variables
@@ -76,7 +62,7 @@ then
 
     if [ -z "$MOODLE_DOCKER_APP_VERSION" ];
     then
-        export MOODLE_DOCKER_APP_VERSION="$MOODLE_APP_VERSION"
+        echo MOODLE_DOCKER_APP_VERSION="$MOODLE_APP_VERSION" >> temp.env
     fi
 fi
 
@@ -101,18 +87,18 @@ then
 
             if (( $appmajorversion > 3 ));
             then
-                export MOODLE_DOCKER_APP_RUNTIME="ionic5"
+                echo MOODLE_DOCKER_APP_RUNTIME="ionic5" >> temp.env
             elif (( $appminorversion != 9));
             then
-                export MOODLE_DOCKER_APP_RUNTIME="ionic3"
+                echo MOODLE_DOCKER_APP_RUNTIME="ionic3" >> temp.env
             elif (( $apppatchversion < 5 ));
             then
-                export MOODLE_DOCKER_APP_RUNTIME="ionic3"
+                echo MOODLE_DOCKER_APP_RUNTIME="ionic3" >> temp.env
             else
-                export MOODLE_DOCKER_APP_RUNTIME="ionic5"
+                echo MOODLE_DOCKER_APP_RUNTIME="ionic5" >> temp.env
             fi
         else
-            export MOODLE_DOCKER_APP_RUNTIME="ionic5"
+            echo MOODLE_DOCKER_APP_RUNTIME="ionic5" >> temp.env
         fi
     fi
 fi
@@ -130,8 +116,8 @@ fi
 
 # Selenium browser
 browserparts=(${MOODLE_DOCKER_BROWSER//:/ })
-export MOODLE_DOCKER_BROWSER_NAME=${browserparts[0]}
-export MOODLE_DOCKER_BROWSER_TAG=${browserparts[1]}
+echo MOODLE_DOCKER_BROWSER_NAME=${browserparts[0]} >> temp.env
+echo MOODLE_DOCKER_BROWSER_TAG=${browserparts[1]} >> temp.env
 
 if [[ -z "$MOODLE_DOCKER_BROWSER_NAME" ]];
 then
@@ -151,26 +137,26 @@ fi
 
 if [[ "$MOODLE_DOCKER_BROWSER_NAME" != "firefox" ]];
 then
-    dockercompose="${dockercompose} -f ${basedir}/selenium.${MOODLE_DOCKER_BROWSER_NAME}.yml"
+    dockercompose="${dockercompose} -f ${basedir}/selenium.${MOODLE_DOCKER_BROWSER_NAME}.yml --env-file temp.env"
 fi
 
 # Selenium VNC port
-export MOODLE_DOCKER_SELENIUM_SUFFIX=""
+# echo  MOODLE_DOCKER_SELENIUM_SUFFIX="" >> temp.env
 if [[ $MOODLE_DOCKER_SELENIUM_VNC_PORT == *":"* ]] || [[ $MOODLE_DOCKER_SELENIUM_VNC_PORT -gt 0 ]]
 then
-    export MOODLE_DOCKER_SELENIUM_SUFFIX="-debug"
+    # echo MOODLE_DOCKER_SELENIUM_SUFFIX="-debug" >> temp.env
     # If no bind ip has been configured (bind_ip:port), default to 127.0.0.1
     if [[ ! $MOODLE_DOCKER_SELENIUM_VNC_PORT == *":"* ]]
     then
         MOODLE_DOCKER_SELENIUM_VNC_PORT=127.0.0.1:$MOODLE_DOCKER_SELENIUM_VNC_PORT
     fi
-    dockercompose="${dockercompose} -f ${basedir}/selenium.debug.yml"
+    dockercompose="${dockercompose} -f ${basedir}/selenium.debug.yml --env-file temp.env"
 fi
 
 # External services
 if [[ ! -z "$MOODLE_DOCKER_PHPUNIT_EXTERNAL_SERVICES" ]];
 then
-    dockercompose="${dockercompose} -f ${basedir}/phpunit-external-services.yml"
+    dockercompose="${dockercompose} -f ${basedir}/phpunit-external-services.yml --env-file temp.env"
 fi
 
 #  Faildump directory
@@ -181,14 +167,14 @@ then
         echo 'Error: $MOODLE_DOCKER_BEHAT_FAILDUMP is not an existing directory'
         exit 1
     fi
-    dockercompose="${dockercompose} -f ${basedir}/behat-faildump.yml"
+    dockercompose="${dockercompose} -f ${basedir}/behat-faildump.yml --env-file temp.env"
 fi
 
 # Webserver host
-export MOODLE_DOCKER_WEB_HOST=${MOODLE_DOCKER_WEB_HOST:-localhost}
+echo MOODLE_DOCKER_WEB_HOST=${MOODLE_DOCKER_WEB_HOST:-localhost} >> temp.env
 
 # Webserver port
-export MOODLE_DOCKER_WEB_PORT=${MOODLE_DOCKER_WEB_PORT:-8000}
+echo MOODLE_DOCKER_WEB_PORT=${MOODLE_DOCKER_WEB_PORT:-8000} >> temp.env
 if [[ $MOODLE_DOCKER_WEB_PORT == *":"* ]] || [[ $MOODLE_DOCKER_WEB_PORT -gt 0 ]]
 then
     # If no bind ip has been configured (bind_ip:port), default to 127.0.0.1
@@ -196,15 +182,15 @@ then
     then
         MOODLE_DOCKER_WEB_PORT=127.0.0.1:$MOODLE_DOCKER_WEB_PORT
     fi
-    dockercompose="${dockercompose} -f ${basedir}/webserver.port.yml"
+    dockercompose="${dockercompose} -f ${basedir}/webserver.port.yml --env-file temp.env"
 fi
 
 
 # Mac OS Compatbility
-if [[ "$(uname)" == "Darwin" ]]; then
-    # Support https://docs.docker.com/docker-for-mac/osxfs-caching/
-    dockercompose="${dockercompose} -f ${basedir}/volumes-cached.yml"
-fi
+# if [[ "$(uname)" == "Darwin" ]]; then
+#     # Support https://docs.docker.com/docker-for-mac/osxfs-caching/
+#     dockercompose="${dockercompose} -f ${basedir}/volumes-cached.yml --env-file temp.env"
+# fi
 
 
 $dockercompose "$@"
