@@ -34,7 +34,7 @@ bin/moodle-docker-compose down
 I've included a source file called project_config.sh
 ```bash
 # Add your env settings here. Any other from the README.md file can be added here.
-export MOODLE_DOCKER_WWWROOT=/Users/jonathan.garcia/Documents/core-moodle #replace for your path
+export MOODLE_DOCKER_WWWROOT=/path/to/moodle #replace for your path
 export MOODLE_DOCKER_DB=mysql
 export MOODLE_DOCKER_DBNAME=m4.0
 export MOODLE_DOCKER_WEB_HOST=moodle.test
@@ -54,7 +54,7 @@ environment variables. Now you can just start by starting up containers.
   * `bin/moodle-nerd-compose`: this is the replacement for environment variables since rancher has no support for env variables.
     ```bash
     # Rancher lacks support for environment variables, this can be used instead. Not elegant BTW.
-    echo "MOODLE_DOCKER_WWWROOT=/Users/jonathan.garcia/Documents/core-moodle" > temp.env
+    echo "MOODLE_DOCKER_WWWROOT=/path/moodle" > temp.env
     echo "MOODLE_DOCKER_DB=mysql" >> temp.env
     echo "MOODLE_DOCKER_DBNAME=m4.0" >> temp.env
     echo "MOODLE_DOCKER_WEB_HOST=moodle.test" >> temp.env
